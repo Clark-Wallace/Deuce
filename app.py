@@ -94,62 +94,34 @@ class Deuce(App):
 
     @work(exclusive=True)
     async def _run_message(self, text: str) -> None:
-        """Send message or execute task via Nexus."""
+        """Send message via Nexus. Always uses execute_task — the model decides
+        whether to use tools or just respond. No routing heuristic needed."""
         chat = self.query_one(ChatPanel)
         ledger = self.query_one(ActionLedger)
         chat.set_working(True)
 
-        # Route: only multi-step build tasks use execute_task (iterative loop).
-        # Simple commands and questions use send_message (single turn, faster).
-        # The threshold: would this require creating multiple files and running tests?
-        text_lower = text.lower()
-        build_phrases = [
-            "build a ", "build me ", "create a project", "create an app",
-            "create a rest", "create a web", "create a cli", "create a script",
-            "make a ", "make me ", "generate a ", "set up a ", "implement a ",
-            "write a program", "write an app", "write a script",
-            "build an ", "create a flask", "create a django", "create a react",
-        ]
-        is_build_task = any(phrase in text_lower for phrase in build_phrases)
-
         try:
-            if is_build_task:
-                ledger.log_info(f"Executing task...")
-                result = await self.deuce_connector.execute_task(text)
+            result = await self.deuce_connector.execute_task(text)
 
-                # Update stats
-                self._total_tokens += result.tokens_used
-                self._total_cost += result.cost
-                self._files_created.extend(result.files_created)
+            # Update stats
+            self._total_tokens += result.tokens_used
+            self._total_cost += result.cost
+            self._files_created.extend(result.files_created)
 
-                # Show result in chat
-                if result.content:
-                    chat.add_ai_message(result.content)
+            # Show result in chat
+            if result.content:
+                chat.add_ai_message(result.content)
 
-                # Show completion in ledger
+            # Show completion in ledger only if tools were actually used
+            if result.files_created or result.iterations > 1:
                 ledger.log_complete(
                     result.files_created,
                     result.tokens_used,
                     result.cost,
                 )
 
-                # Refresh file browser
-                self._refresh_files()
-            else:
-                ledger.log_info("Sending message...")
-                response = await self.deuce_connector.send_message(text)
-
-                # Update stats
-                usage = response.get("usage", {})
-                self._total_tokens += usage.get("total_tokens", 0)
-
-                # Show response
-                if response.get("content"):
-                    chat.add_ai_message(response["content"])
-
-                # Refresh file browser if tools were used
-                if response.get("tool_calls") or response.get("tool_results"):
-                    self._refresh_files()
+            # Refresh file browser
+            self._refresh_files()
 
         except Exception as e:
             chat.add_system_message(f"Error: {e}")
