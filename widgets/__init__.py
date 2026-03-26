@@ -3,3 +3,5 @@ from .action_ledger import ActionLedger
 from .file_browser import FileBrowser
 from .confirm_dialog import ConfirmDialog
 from .provider_switcher import ProviderSwitcher
+from .live_preview import LivePreview
+from .split_bar import SplitBar
