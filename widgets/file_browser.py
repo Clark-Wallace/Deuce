@@ -24,16 +24,16 @@ class FileBrowser(Horizontal):
         super().__init__(**kwargs)
         self.workspace = workspace
         self.selected_file: Path | None = None
+        self.selected_dir: Path | None = None
         self._last_click_path: Path | None = None
         self._last_click_time: float = 0
-        self._last_dir_path: Path | None = None
-        self._last_dir_time: float = 0
 
     def compose(self) -> ComposeResult:
         with Vertical(id="file-tree-container"):
             with Horizontal(id="file-nav-bar"):
                 yield Button("↑ ..", id="nav-up", variant="default")
                 yield Static(self._short_path(self.workspace), id="nav-path")
+                yield Button("↓ Open", id="nav-into", variant="default")
             yield DirectoryTree(self.workspace, id="file-tree")
         with Vertical(id="file-preview-container"):
             yield Static("Preview", id="file-preview-title")
@@ -83,25 +83,21 @@ class FileBrowser(Horizontal):
             preview.load_text(f"Could not read file: {e}")
 
     def on_directory_tree_directory_selected(self, event) -> None:
-        """Double-click a folder to navigate into it as the new workspace."""
-        path = Path(event.path)
-        now = time.time()
-
-        if (self._last_dir_path == path
-                and (now - self._last_dir_time) < self.DOUBLE_CLICK_THRESHOLD):
-            self._navigate_to(path)
-            self._last_dir_path = None
-            self._last_dir_time = 0
-            return
-
-        self._last_dir_path = path
-        self._last_dir_time = now
+        """Single click on a folder: select it. Use ↓ Open button to enter it."""
+        self.selected_dir = Path(event.path)
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        """Handle nav-up button."""
+        """Handle nav buttons."""
         if event.button.id == "nav-up":
             parent = Path(self.workspace).resolve().parent
             self._navigate_to(parent)
+        elif event.button.id == "nav-into":
+            if self.selected_dir and self.selected_dir.is_dir():
+                self._navigate_to(self.selected_dir)
+                self.selected_dir = None
+            else:
+                # No folder selected — flash the button or do nothing
+                pass
 
     def _navigate_to(self, path: Path) -> None:
         """Switch the workspace to a new directory."""
