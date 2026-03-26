@@ -36,6 +36,7 @@ class Deuce(App):
         ("ctrl+o", "open_folder", "Open Folder"),
         ("ctrl+p", "focus_provider", "Provider"),
         ("ctrl+r", "run_file", "Run File"),
+        ("ctrl+c", "cancel_task", "Cancel"),
         ("ctrl+l", "clear_ledger", "Clear Ledger"),
         ("ctrl+n", "new_session", "New Session"),
         ("ctrl+q", "quit", "Quit"),
@@ -47,6 +48,7 @@ class Deuce(App):
         Path(workspace).mkdir(exist_ok=True)
 
         self._confirm_future: asyncio.Future | None = None
+        self._current_worker = None
         self._total_tokens = 0
         self._total_cost = 0.0
         self._files_created: list[str] = []
@@ -96,7 +98,7 @@ class Deuce(App):
 
     def on_chat_panel_message_submitted(self, event: ChatPanel.MessageSubmitted) -> None:
         """User submitted a message — send it to the AI."""
-        self._run_message(event.text)
+        self._current_worker = self._run_message(event.text)
 
     @work(thread=True, exclusive=True)
     def _run_message(self, text: str) -> None:
@@ -309,6 +311,19 @@ class Deuce(App):
         return path
 
     # ── Actions ──────────────────────────────────────────
+
+    def action_cancel_task(self) -> None:
+        """Cancel the currently running task."""
+        if self._current_worker and self._current_worker.is_running:
+            self._current_worker.cancel()
+            self._current_worker = None
+            chat = self.query_one(ChatPanel)
+            ledger = self.query_one(ActionLedger)
+            chat.set_working(False)
+            chat.add_system_message("Task cancelled.")
+            ledger.log_info("Task cancelled by user.")
+            # Clear conversation history to avoid corrupted state
+            self.deuce_connector.clear_history()
 
     def action_clear_ledger(self) -> None:
         self.query_one(ActionLedger).clear()
