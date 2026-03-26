@@ -33,6 +33,7 @@ class Deuce(App):
         ("shift+tab", "focus_previous", "Prev"),
         ("ctrl+o", "open_folder", "Open Folder"),
         ("ctrl+p", "focus_provider", "Provider"),
+        ("ctrl+r", "run_file", "Run File"),
         ("ctrl+l", "clear_ledger", "Clear Ledger"),
         ("ctrl+n", "new_session", "New Session"),
         ("ctrl+q", "quit", "Quit"),
@@ -269,6 +270,58 @@ class Deuce(App):
     def action_clear_ledger(self) -> None:
         ledger = self.query_one("#ledger-log")
         ledger.clear()
+
+    def action_run_file(self) -> None:
+        """Run the currently selected file in the file browser."""
+        browser = self.query_one(FileBrowser)
+        if not browser.selected_file:
+            chat = self.query_one(ChatPanel)
+            chat.add_system_message("No file selected. Click a file in the browser first.")
+            return
+
+        path = browser.selected_file
+        suffix = path.suffix.lower()
+
+        # Determine the run command based on file type
+        runners = {
+            ".py": "python3",
+            ".js": "node",
+            ".ts": "npx tsx",
+            ".sh": "bash",
+            ".rb": "ruby",
+            ".go": "go run",
+        }
+
+        runner = runners.get(suffix)
+        if not runner:
+            chat = self.query_one(ChatPanel)
+            chat.add_system_message(f"Don't know how to run {path.name}")
+            return
+
+        self._execute_run(str(path), runner)
+
+    @work(exclusive=True)
+    async def _execute_run(self, file_path: str, runner: str) -> None:
+        """Execute a file and show output."""
+        chat = self.query_one(ChatPanel)
+        ledger = self.query_one(ActionLedger)
+        chat.set_working(True)
+
+        try:
+            result = await self.deuce_connector.execute_task(
+                f"Run this command and show me the output: {runner} {file_path}"
+            )
+            self._total_tokens += result.tokens_used
+            self._total_cost += result.cost
+
+            if result.content:
+                chat.add_ai_message(result.content)
+        except Exception as e:
+            chat.add_system_message(f"Error: {e}")
+            ledger.log_error(e)
+        finally:
+            chat.set_working(False)
+            self._update_footer()
 
     def action_new_session(self) -> None:
         self.deuce_connector.clear_history()

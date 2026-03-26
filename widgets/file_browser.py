@@ -12,6 +12,7 @@ class FileBrowser(Horizontal):
     def __init__(self, workspace: str = "./workspace", **kwargs) -> None:
         super().__init__(**kwargs)
         self.workspace = workspace
+        self.selected_file: Path | None = None
 
     def compose(self) -> ComposeResult:
         with Vertical(id="file-tree-container"):
@@ -30,6 +31,7 @@ class FileBrowser(Horizontal):
     def on_directory_tree_file_selected(self, event: DirectoryTree.FileSelected) -> None:
         """Load selected file into preview pane."""
         path = Path(event.path)
+        self.selected_file = path
         title = self.query_one("#file-preview-title", Static)
         preview = self.query_one("#file-preview", TextArea)
 
