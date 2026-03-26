@@ -1,0 +1,5 @@
+# Nexus Connector SDK — installed from GitHub
+nexus-connector @ git+https://github.com/Clark-Wallace/The-Nexus-Connector.git
+
+# TUI framework (only new dependency beyond Nexus)
+textual>=0.40.0

@@ -1,0 +1,139 @@
+/* Deuce — TUI Styles */
+
+Screen {
+    layout: vertical;
+}
+
+Header {
+    dock: top;
+    height: 1;
+    background: $primary-darken-3;
+}
+
+Footer {
+    dock: bottom;
+    height: 1;
+}
+
+/* Main layout: chat area (left) + action ledger (right) */
+#main-container {
+    layout: horizontal;
+    height: 1fr;
+}
+
+/* Left column: chat on top, file browser on bottom */
+#left-column {
+    width: 2fr;
+    layout: vertical;
+}
+
+/* Right column: action ledger */
+#action-ledger {
+    width: 1fr;
+    min-width: 30;
+    border-left: solid $primary-darken-2;
+}
+
+#action-ledger-title {
+    dock: top;
+    height: 1;
+    background: $primary-darken-2;
+    color: $text;
+    text-align: center;
+    text-style: bold;
+    padding: 0 1;
+}
+
+#ledger-log {
+    height: 1fr;
+}
+
+/* Chat area */
+#chat-area {
+    height: 2fr;
+    border-bottom: solid $primary-darken-2;
+}
+
+#chat-log {
+    height: 1fr;
+}
+
+#chat-input {
+    dock: bottom;
+    height: 3;
+    padding: 0 1;
+}
+
+/* File browser area */
+#file-area {
+    height: 1fr;
+    layout: horizontal;
+}
+
+#file-tree-container {
+    width: 1fr;
+    border-right: solid $surface-darken-1;
+}
+
+#file-tree-title {
+    dock: top;
+    height: 1;
+    background: $primary-darken-2;
+    color: $text;
+    text-align: center;
+    text-style: bold;
+    padding: 0 1;
+}
+
+#file-tree {
+    height: 1fr;
+}
+
+#file-preview-container {
+    width: 2fr;
+}
+
+#file-preview-title {
+    dock: top;
+    height: 1;
+    background: $primary-darken-2;
+    color: $text;
+    text-style: bold;
+    padding: 0 1;
+}
+
+#file-preview {
+    height: 1fr;
+}
+
+/* Provider select in header area */
+#provider-bar {
+    dock: top;
+    height: 1;
+    layout: horizontal;
+    background: $primary-darken-3;
+    padding: 0 1;
+}
+
+#provider-label {
+    width: auto;
+    color: $text-muted;
+    padding: 0 1 0 0;
+}
+
+#provider-select {
+    width: 20;
+    height: 1;
+}
+
+#workspace-label {
+    width: 1fr;
+    color: $text-muted;
+    text-align: center;
+}
+
+#status-label {
+    width: auto;
+    color: $text-muted;
+    padding: 0 0 0 1;
+}
