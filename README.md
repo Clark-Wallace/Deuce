@@ -9,6 +9,16 @@
 
 **One sentence in. Eight files out. Watch it happen.**
 
+<!-- Demo video — replace with actual recording -->
+<!-- https://github.com/user-attachments/assets/YOUR-VIDEO-ID -->
+<!--
+<p align="center">
+  <a href="https://github.com/Clark-Wallace/Deuce">
+    <img src="https://img.shields.io/badge/▶_Watch_Demo-1a1a2e?style=for-the-badge&logo=youtube&logoColor=white" alt="Watch Demo">
+  </a>
+</p>
+-->
+
 [Quick Start](#-quick-start) • [What You See](#-what-you-see) • [The Action Ledger](#-the-action-ledger) • [Built on Nexus](#-built-on-nexus)
 
 </div>
