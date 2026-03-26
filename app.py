@@ -134,27 +134,17 @@ class Deuce(App):
                 ledger.log_info("Sending message...")
                 response = await self.deuce_connector.send_message(text)
 
-                # If the AI responded with tool calls but no content,
-                # the tools were auto-executed — send a follow-up to get the text answer
-                if response.get("tool_calls") and not response.get("content"):
+                # Update stats
+                usage = response.get("usage", {})
+                self._total_tokens += usage.get("total_tokens", 0)
+
+                # Show response
+                if response.get("content"):
+                    chat.add_ai_message(response["content"])
+
+                # Refresh file browser if tools were used
+                if response.get("tool_calls") or response.get("tool_results"):
                     self._refresh_files()
-                    follow_up = await self.deuce_connector.send_message(
-                        "Please summarize the result."
-                    )
-                    usage = follow_up.get("usage", {})
-                    self._total_tokens += usage.get("total_tokens", 0)
-                    if follow_up.get("content"):
-                        chat.add_ai_message(follow_up["content"])
-                else:
-                    # Normal chat response
-                    usage = response.get("usage", {})
-                    self._total_tokens += usage.get("total_tokens", 0)
-
-                    if response.get("content"):
-                        chat.add_ai_message(response["content"])
-
-                    if response.get("tool_calls"):
-                        self._refresh_files()
 
         except Exception as e:
             chat.add_system_message(f"Error: {e}")
