@@ -18,6 +18,8 @@ from widgets.action_ledger import ActionLedger
 from widgets.file_browser import FileBrowser
 from widgets.confirm_dialog import ConfirmDialog
 from widgets.provider_switcher import ProviderSwitcher
+from widgets.live_preview import LivePreview
+from widgets.split_bar import SplitBar
 from connector import DeuceConnector
 
 
@@ -74,7 +76,10 @@ class Deuce(App):
             with Vertical(id="left-column"):
                 yield ChatPanel(id="chat-area")
                 yield FileBrowser(workspace=self.workspace, id="file-area")
-            yield ActionLedger(id="action-ledger")
+            with Vertical(id="right-column"):
+                yield ActionLedger(id="action-ledger")
+                yield SplitBar(id="ledger-split")
+                yield LivePreview(id="live-preview")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -93,81 +98,103 @@ class Deuce(App):
         """User submitted a message — send it to the AI."""
         self._run_message(event.text)
 
-    @work(exclusive=True)
-    async def _run_message(self, text: str) -> None:
-        """Send message via Nexus. Always uses execute_task — the model decides
-        whether to use tools or just respond. No routing heuristic needed."""
-        chat = self.query_one(ChatPanel)
-        ledger = self.query_one(ActionLedger)
-        chat.set_working(True)
-
+    @work(thread=True, exclusive=True)
+    def _run_message(self, text: str) -> None:
+        """Send message via Nexus in a background thread so the UI stays live."""
+        self.call_from_thread(self._begin_working, text)
         try:
-            result = await self.deuce_connector.execute_task(text)
-
-            # Update stats
-            self._total_tokens += result.tokens_used
-            self._total_cost += result.cost
-            self._files_created.extend(result.files_created)
-
-            # Show result in chat
-            if result.content:
-                chat.add_ai_message(result.content)
-
-            # Show completion in ledger only if tools were actually used
-            if result.files_created or result.iterations > 1:
-                ledger.log_complete(
-                    result.files_created,
-                    result.tokens_used,
-                    result.cost,
-                )
-
-            # Refresh file browser
-            self._refresh_files()
-
+            result = asyncio.run(self.deuce_connector.execute_task(text))
+            self.call_from_thread(self._complete_task, result)
         except Exception as e:
-            chat.add_system_message(f"Error: {e}")
-            ledger.log_error(e)
-        finally:
-            chat.set_working(False)
-            self._update_footer()
+            self.call_from_thread(self._fail_task, e)
 
-    # ── Nexus hooks (called from connector) ──────────────
+    def _begin_working(self, text: str = "") -> None:
+        self.query_one(ChatPanel).set_working(True)
+        if text:
+            self.query_one(ActionLedger).log_task_received(text)
+
+    def _complete_task(self, result) -> None:
+        self._total_tokens += result.tokens_used
+        self._total_cost += result.cost
+        self._files_created.extend(result.files_created)
+        if result.content:
+            self.query_one(ChatPanel).add_ai_message(result.content)
+        if result.files_created or result.iterations > 1:
+            self.query_one(ActionLedger).log_complete(
+                result.files_created, result.tokens_used, result.cost,
+            )
+        self._refresh_files()
+        self.query_one(ChatPanel).set_working(False)
+        self._update_footer()
+
+    def _fail_task(self, error: Exception) -> None:
+        self.query_one(ChatPanel).add_system_message(f"Error: {error}")
+        self.query_one(ActionLedger).log_error(error)
+        self.query_one(ChatPanel).set_working(False)
+        self._update_footer()
+
+    # ── Nexus hooks (called from background thread) ─────
+    #
+    # Hooks fire from the Nexus execution thread.
+    # call_from_thread schedules UI work on the main thread
+    # so Textual renders updates in real-time.
 
     def _handle_tool_call(self, tc: dict) -> None:
+        self.call_from_thread(self._on_tool_call, tc)
+
+    def _on_tool_call(self, tc: dict) -> None:
         try:
-            ledger = self.query_one(ActionLedger)
-            ledger.log_tool_call(tc)
+            self.query_one(ActionLedger).log_tool_call(tc)
+        except Exception:
+            pass
+        try:
+            name = tc.get("name", "")
+            args = tc.get("arguments", {})
+            if name in ("create_file", "write_file", "edit_file"):
+                content = args.get("content", "")
+                path = args.get("path", args.get("filename", ""))
+                if content and path:
+                    self.query_one(LivePreview).show_file(path, content)
         except Exception:
             pass
 
     def _handle_tool_result(self, tr: dict) -> None:
+        self.call_from_thread(self._on_tool_result, tr)
+
+    def _on_tool_result(self, tr: dict) -> None:
         try:
-            ledger = self.query_one(ActionLedger)
-            ledger.log_tool_result(tr)
+            self.query_one(ActionLedger).log_tool_result(tr)
             self._refresh_files()
         except Exception:
             pass
 
     def _handle_step(self, step: int, status: str) -> None:
+        self.call_from_thread(self._on_step, step, status)
+
+    def _on_step(self, step: int, status: str) -> None:
         try:
-            ledger = self.query_one(ActionLedger)
-            ledger.log_step(step, status)
+            self.query_one(ActionLedger).log_step(step, status)
         except Exception:
             pass
 
     def _handle_error(self, error: Exception) -> None:
+        self.call_from_thread(self._on_error, error)
+
+    def _on_error(self, error: Exception) -> None:
         try:
-            ledger = self.query_one(ActionLedger)
-            ledger.log_error(error)
+            self.query_one(ActionLedger).log_error(error)
         except Exception:
             pass
 
     def _handle_provider_switch(self, old: str, new: str, reason: str) -> None:
+        self.call_from_thread(self._on_provider_switch, old, new, reason)
+
+    def _on_provider_switch(self, old: str, new: str, reason: str) -> None:
         try:
-            ledger = self.query_one(ActionLedger)
-            ledger.log_provider_switch(old, new, reason)
-            chat = self.query_one(ChatPanel)
-            chat.add_system_message(f"Switched from {old} to {new}: {reason}")
+            self.query_one(ActionLedger).log_provider_switch(old, new, reason)
+            self.query_one(ChatPanel).add_system_message(
+                f"Switched from {old} to {new}: {reason}"
+            )
         except Exception:
             pass
 
@@ -268,8 +295,7 @@ class Deuce(App):
     # ── Actions ──────────────────────────────────────────
 
     def action_clear_ledger(self) -> None:
-        ledger = self.query_one("#ledger-log")
-        ledger.clear()
+        self.query_one(ActionLedger).clear()
 
     def action_run_file(self) -> None:
         """Run the currently selected file in the file browser."""
@@ -300,28 +326,17 @@ class Deuce(App):
 
         self._execute_run(str(path), runner)
 
-    @work(exclusive=True)
-    async def _execute_run(self, file_path: str, runner: str) -> None:
-        """Execute a file and show output."""
-        chat = self.query_one(ChatPanel)
-        ledger = self.query_one(ActionLedger)
-        chat.set_working(True)
-
+    @work(thread=True, exclusive=True)
+    def _execute_run(self, file_path: str, runner: str) -> None:
+        """Execute a file in a background thread."""
+        self.call_from_thread(self._begin_working)
         try:
-            result = await self.deuce_connector.execute_task(
+            result = asyncio.run(self.deuce_connector.execute_task(
                 f"Run this command and show me the output: {runner} {file_path}"
-            )
-            self._total_tokens += result.tokens_used
-            self._total_cost += result.cost
-
-            if result.content:
-                chat.add_ai_message(result.content)
+            ))
+            self.call_from_thread(self._complete_task, result)
         except Exception as e:
-            chat.add_system_message(f"Error: {e}")
-            ledger.log_error(e)
-        finally:
-            chat.set_working(False)
-            self._update_footer()
+            self.call_from_thread(self._fail_task, e)
 
     def action_new_session(self) -> None:
         self.deuce_connector.clear_history()
