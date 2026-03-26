@@ -102,7 +102,9 @@ class Deuce(App):
         # Heuristic: if the message looks like a task, use execute_task
         is_task = any(
             kw in text.lower()
-            for kw in ["create", "build", "make", "write", "generate", "set up", "implement", "add"]
+            for kw in ["create", "build", "make", "write", "generate", "set up", "implement", "add",
+                        "what files", "list", "show me", "search", "find", "run", "execute",
+                        "install", "test", "delete", "remove", "update", "fix", "check"]
         )
 
         try:
@@ -132,18 +134,33 @@ class Deuce(App):
                 ledger.log_info("Sending message...")
                 response = await self.deuce_connector.send_message(text)
 
-                # Update stats
-                usage = response.get("usage", {})
-                tokens = usage.get("total_tokens", 0)
-                self._total_tokens += tokens
-
-                # Show response
-                if response.get("content"):
-                    chat.add_ai_message(response["content"])
-
-                # If there were tool calls, refresh files
-                if response.get("tool_calls"):
+                # If the AI responded with tool calls but no content,
+                # it needs the execute_task loop to complete the work
+                if response.get("tool_calls") and not response.get("content"):
+                    ledger.log_info("AI wants to use tools — switching to task mode...")
+                    result = await self.deuce_connector.execute_task(text)
+                    self._total_tokens += result.tokens_used
+                    self._total_cost += result.cost
+                    self._files_created.extend(result.files_created)
+                    if result.content:
+                        chat.add_ai_message(result.content)
+                    ledger.log_complete(
+                        result.files_created,
+                        result.tokens_used,
+                        result.cost,
+                    )
                     self._refresh_files()
+                else:
+                    # Normal chat response
+                    usage = response.get("usage", {})
+                    tokens = usage.get("total_tokens", 0)
+                    self._total_tokens += tokens
+
+                    if response.get("content"):
+                        chat.add_ai_message(response["content"])
+
+                    if response.get("tool_calls"):
+                        self._refresh_files()
 
         except Exception as e:
             chat.add_system_message(f"Error: {e}")
