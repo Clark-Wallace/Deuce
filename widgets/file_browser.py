@@ -42,7 +42,13 @@ class FileBrowser(Horizontal):
         # Double-click detection: same file clicked within threshold
         if (self._last_click_path == path
                 and (now - self._last_click_time) < self.DOUBLE_CLICK_THRESHOLD):
-            self._open_with_system(path)
+            suffix = path.suffix.lower()
+            if suffix in self._RUN_IN_TERMINAL:
+                self._run_in_terminal(path)
+            elif suffix in self._OPEN_WITH_SYSTEM:
+                self._open_with_system(path)
+            else:
+                self._open_with_system(path)  # fallback
             self._last_click_path = None
             self._last_click_time = 0
             return
@@ -65,11 +71,41 @@ class FileBrowser(Horizontal):
             title.update(f" {path.name} (error)")
             preview.load_text(f"Could not read file: {e}")
 
+    # Files that should be run in a new Terminal window on double-click
+    _RUN_IN_TERMINAL = {
+        ".py": "python3",
+        ".sh": "bash",
+        ".rb": "ruby",
+        ".js": "node",
+    }
+
+    # Files that open with system default (browser, editor, etc.)
+    _OPEN_WITH_SYSTEM = {".html", ".htm", ".pdf", ".png", ".jpg", ".jpeg", ".gif", ".svg"}
+
     @staticmethod
     def _open_with_system(path: Path) -> None:
         """Open a file with the system default application."""
         try:
             subprocess.Popen(["open", str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except Exception:
+            pass
+
+    @classmethod
+    def _run_in_terminal(cls, path: Path) -> None:
+        """Run a script in a new Terminal.app window."""
+        runner = cls._RUN_IN_TERMINAL.get(path.suffix.lower())
+        if not runner:
+            return
+        # osascript opens a new Terminal window and runs the command
+        cmd = f'{runner} "{path}"'
+        script = (
+            f'tell application "Terminal"\n'
+            f'  activate\n'
+            f'  do script "cd \\"{path.parent}\\" && {cmd}; echo \\"\\"; echo \\"[Press Enter to close]\\" && read"\n'
+            f'end tell'
+        )
+        try:
+            subprocess.Popen(["osascript", "-e", script], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception:
             pass
 
