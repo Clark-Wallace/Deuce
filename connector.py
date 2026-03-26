@@ -20,6 +20,7 @@ KEY_MAP = {
     "google": "GOOGLE_API_KEY",
     "deepseek": "DEEPSEEK_API_KEY",
     "xai": "XAI_API_KEY",
+    "minimax": "MINIMAX_API_KEY",
 }
 
 PROVIDER_NAMES = {
@@ -28,6 +29,7 @@ PROVIDER_NAMES = {
     "google": "Google Gemini",
     "deepseek": "DeepSeek",
     "xai": "xAI Grok",
+    "minimax": "MiniMax M2.7",
     "ollama": "Ollama (Local)",
 }
 
@@ -55,7 +57,9 @@ def detect_default_provider() -> tuple[Optional[str], Optional[str]]:
         key = os.getenv(env_var)
         if key:
             return prov, key
-    return None, None
+
+    # Fall back to Ollama if no cloud providers configured
+    return "ollama", ""
 
 
 class DeuceConnector:
@@ -91,8 +95,16 @@ class DeuceConnector:
     def _build_connector(self) -> NexusConnector:
         from nexus.core.base_connector import Message as NexusMessage
 
+        # MiniMax routes through OpenAI-compatible API
+        provider = self.current_provider
+        kwargs = {}
+        if provider == "minimax":
+            provider = "openai"
+            kwargs["base_url"] = "https://api.minimax.io/v1"
+            kwargs["model"] = "MiniMax-M2.7"
+
         connector = NexusConnector(
-            provider=self.current_provider,
+            provider=provider,
             api_key=self.current_api_key,
             workspace=self.workspace,
             max_iterations=20,
@@ -103,6 +115,7 @@ class DeuceConnector:
             on_error=self._on_error,
             on_provider_switch=self._on_provider_switch,
             confirm_callback=self._confirm_callback,
+            **kwargs,
         )
 
         # Inject system prompt with project state
