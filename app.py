@@ -329,45 +329,98 @@ class Deuce(App):
         self.query_one(ActionLedger).clear()
 
     def action_run_file(self) -> None:
-        """Run the currently selected file in the file browser."""
+        """Run the currently selected file directly — output goes to live preview."""
         browser = self.query_one(FileBrowser)
         if not browser.selected_file:
-            chat = self.query_one(ChatPanel)
-            chat.add_system_message("No file selected. Click a file in the browser first.")
+            self.query_one(ChatPanel).add_system_message(
+                "No file selected. Click a file in the browser first."
+            )
             return
 
         path = browser.selected_file
         suffix = path.suffix.lower()
 
-        # Determine the run command based on file type
         runners = {
-            ".py": "python3",
-            ".js": "node",
-            ".ts": "npx tsx",
-            ".sh": "bash",
-            ".rb": "ruby",
-            ".go": "go run",
+            ".py": "python3", ".js": "node", ".ts": "npx tsx",
+            ".sh": "bash", ".rb": "ruby", ".go": "go run",
         }
 
         runner = runners.get(suffix)
         if not runner:
-            chat = self.query_one(ChatPanel)
-            chat.add_system_message(f"Don't know how to run {path.name}")
+            self.query_one(ChatPanel).add_system_message(
+                f"Don't know how to run {path.name}"
+            )
             return
 
-        self._execute_run(str(path), runner)
+        self._execute_run_direct(str(path), path.name, runner)
 
-    @work(thread=True, exclusive=True)
-    def _execute_run(self, file_path: str, runner: str) -> None:
-        """Execute a file in a background thread."""
-        self.call_from_thread(self._begin_working)
+    @work(thread=True)
+    def _execute_run_direct(self, file_path: str, file_name: str, runner: str) -> None:
+        """Run a file directly via subprocess — no AI involved."""
+        import subprocess
+
+        self.call_from_thread(
+            self.query_one(LivePreview).show_output,
+            f"Running {file_name}",
+            f"$ {runner} {file_path}\n\n"
+        )
+        self.call_from_thread(
+            self.query_one(ActionLedger).log_info,
+            f"Running {file_name}"
+        )
+
         try:
-            result = asyncio.run(self.deuce_connector.execute_task(
-                f"Run this command and show me the output: {runner} {file_path}"
-            ))
-            self.call_from_thread(self._complete_task, result)
+            result = subprocess.run(
+                f"{runner} {file_path}",
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=30,
+                cwd=str(Path(file_path).parent),
+            )
+
+            output = result.stdout or ""
+            if result.stderr:
+                output += f"\n--- stderr ---\n{result.stderr}"
+
+            if result.returncode == 0:
+                display = f"$ {runner} {file_name}\n\n{output}" if output else f"$ {runner} {file_name}\n\n(no output)"
+                self.call_from_thread(
+                    self.query_one(LivePreview).show_output,
+                    f"✓ {file_name}", display
+                )
+                self.call_from_thread(
+                    self.query_one(ActionLedger).log_info,
+                    f"✓ {file_name} — exit 0"
+                )
+            else:
+                display = f"$ {runner} {file_name}\n\nExit code: {result.returncode}\n\n{output}"
+                self.call_from_thread(
+                    self.query_one(LivePreview).show_output,
+                    f"✗ {file_name}", display
+                )
+                self.call_from_thread(
+                    self.query_one(ActionLedger).log_info,
+                    f"✗ {file_name} — exit {result.returncode}"
+                )
+
+        except subprocess.TimeoutExpired:
+            self.call_from_thread(
+                self.query_one(LivePreview).show_output,
+                f"⏱ {file_name}", f"$ {runner} {file_name}\n\nTimed out after 30 seconds."
+            )
+            self.call_from_thread(
+                self.query_one(ActionLedger).log_info,
+                f"⏱ {file_name} — timed out"
+            )
         except Exception as e:
-            self.call_from_thread(self._fail_task, e)
+            self.call_from_thread(
+                self.query_one(LivePreview).show_output,
+                f"✗ {file_name}", f"Error: {e}"
+            )
+            self.call_from_thread(
+                self.query_one(ActionLedger).log_error, e
+            )
 
     def action_new_session(self) -> None:
         self.deuce_connector.clear_history()
