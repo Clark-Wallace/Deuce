@@ -5,6 +5,7 @@ One sentence in. Eight files out. Watch it happen.
 """
 
 import asyncio
+import json
 import sys
 from pathlib import Path
 
@@ -21,6 +22,28 @@ from widgets.provider_switcher import ProviderSwitcher
 from widgets.live_preview import LivePreview
 from widgets.split_bar import SplitBar
 from connector import DeuceConnector
+
+# Config file stores persistent settings (last workspace, etc.)
+CONFIG_PATH = Path.home() / ".deuce" / "config.json"
+
+
+def _load_config() -> dict:
+    """Load persistent config from ~/.deuce/config.json."""
+    try:
+        if CONFIG_PATH.exists():
+            return json.loads(CONFIG_PATH.read_text())
+    except Exception:
+        pass
+    return {}
+
+
+def _save_config(config: dict) -> None:
+    """Save persistent config to ~/.deuce/config.json."""
+    try:
+        CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        CONFIG_PATH.write_text(json.dumps(config, indent=2))
+    except Exception:
+        pass
 
 
 class Deuce(App):
@@ -277,6 +300,11 @@ class Deuce(App):
         self.workspace = folder
         Path(folder).mkdir(parents=True, exist_ok=True)
 
+        # Persist the workspace choice
+        config = _load_config()
+        config["workspace"] = folder
+        _save_config(config)
+
         # Repoint the connector
         from tools import set_workspace
         set_workspace(folder)
@@ -432,9 +460,12 @@ class Deuce(App):
 
 
 def main():
-    workspace = "./workspace"
+    # Priority: CLI arg > saved config > default
     if len(sys.argv) > 1:
         workspace = sys.argv[1]
+    else:
+        config = _load_config()
+        workspace = config.get("workspace", "./workspace")
 
     app = Deuce(workspace=workspace)
     app.run()
