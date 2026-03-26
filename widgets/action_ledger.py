@@ -10,6 +10,7 @@ from typing import Optional
 from textual.app import ComposeResult
 from textual.containers import Vertical, ScrollableContainer
 from textual.widgets import Static
+from rich.markup import escape as rich_escape
 
 
 # ── Design tokens (from HTML reference) ───────────────────
@@ -149,30 +150,33 @@ def _tag_markup(tag: str, entry_type: str, success: Optional[bool] = None) -> st
 
 def _label_markup(entry: LedgerEntry) -> str:
     """Render the label — bright for filenames, code-style for commands."""
+    safe = rich_escape(entry.label)
     if entry.tag in ("RUN", "VERIFY"):
-        return f"[{C['text_sec']} on {C['bg_entry']}] {entry.label} [/]"
+        return f"[{C['text_sec']} on {C['bg_entry']}] {safe} [/]"
     else:
-        return f"[bold {C['text_bright']}]{entry.label}[/]"
+        return f"[bold {C['text_bright']}]{safe}[/]"
 
 
 def _detail_markup(entry: LedgerEntry) -> str:
     """Render detail text with appropriate color."""
     if not entry.detail:
         return ""
+    safe = rich_escape(entry.detail)
     if entry.success is False:
-        return f"[bold {C['fail']}]{entry.detail}[/]"
+        return f"[bold {C['fail']}]{safe}[/]"
     if entry.success is True and entry.entry_type in ("verify", "pass"):
-        return f"[{C['create']}]{entry.detail}[/]"
-    return f"[{C['text_dim']}]{entry.detail}[/]"
+        return f"[{C['create']}]{safe}[/]"
+    return f"[{C['text_dim']}]{safe}[/]"
 
 
 def render_task_header(timestamp: str, task_text: str) -> str:
     """Render the TASK RECEIVED block."""
+    safe_text = rich_escape(task_text)
     return (
         f"[{C['text_dim']}]{timestamp}[/]  "
         f"[{C['info']}]●[/]  "
         f"[bold {C['info']}]TASK RECEIVED[/]\n"
-        f"         [{C['text_sec']} italic]\"{task_text}\"[/]"
+        f"         [{C['text_sec']} italic]\"{safe_text}\"[/]"
     )
 
 
@@ -208,7 +212,8 @@ def render_group(entries: list[LedgerEntry]) -> str:
 
 def render_narrative(timestamp: str, text: str) -> str:
     """Render a narrative entry (assessment, status, transition)."""
-    return f"[{C['text_dim']}]{timestamp}[/]  [{C['text_sec']}]{text}[/]"
+    safe = rich_escape(text)
+    return f"[{C['text_dim']}]{timestamp}[/]  [{C['text_sec']}]{safe}[/]"
 
 
 def render_complete(files: list, tokens: int, cost: float, tool_calls: int = 0, fix_cycles: int = 0) -> str:
@@ -345,8 +350,9 @@ class ActionLedger(Vertical):
         ts = datetime.now().strftime("%H:%M:%S")
         msg = str(error)
         display = msg if len(msg) < 70 else msg[:67] + "..."
+        safe = rich_escape(display)
         widget = Static(
-            f"[{C['text_dim']}]{ts}[/]  [bold {C['fail']}]{display}[/]",
+            f"[{C['text_dim']}]{ts}[/]  [bold {C['fail']}]{safe}[/]",
             markup=True, classes="ledger-error",
         )
         self._mount_widget(widget)
