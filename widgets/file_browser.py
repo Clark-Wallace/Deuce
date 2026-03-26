@@ -5,7 +5,8 @@ import time
 from pathlib import Path
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
-from textual.widgets import DirectoryTree, TextArea, Static
+from textual.widgets import DirectoryTree, TextArea, Static, Button
+from textual.message import Message
 
 
 class FileBrowser(Horizontal):
@@ -13,16 +14,26 @@ class FileBrowser(Horizontal):
 
     DOUBLE_CLICK_THRESHOLD = 0.4  # seconds
 
+    class WorkspaceChanged(Message):
+        """User navigated to a new workspace directory."""
+        def __init__(self, path: str) -> None:
+            super().__init__()
+            self.path = path
+
     def __init__(self, workspace: str = "./workspace", **kwargs) -> None:
         super().__init__(**kwargs)
         self.workspace = workspace
         self.selected_file: Path | None = None
         self._last_click_path: Path | None = None
         self._last_click_time: float = 0
+        self._last_dir_path: Path | None = None
+        self._last_dir_time: float = 0
 
     def compose(self) -> ComposeResult:
         with Vertical(id="file-tree-container"):
-            yield Static("Files", id="file-tree-title")
+            with Horizontal(id="file-nav-bar"):
+                yield Button("↑ ..", id="nav-up", variant="default")
+                yield Static(self._short_path(self.workspace), id="nav-path")
             yield DirectoryTree(self.workspace, id="file-tree")
         with Vertical(id="file-preview-container"):
             yield Static("Preview", id="file-preview-title")
@@ -70,6 +81,50 @@ class FileBrowser(Horizontal):
         except Exception as e:
             title.update(f" {path.name} (error)")
             preview.load_text(f"Could not read file: {e}")
+
+    def on_directory_tree_directory_selected(self, event) -> None:
+        """Double-click a folder to navigate into it as the new workspace."""
+        path = Path(event.path)
+        now = time.time()
+
+        if (self._last_dir_path == path
+                and (now - self._last_dir_time) < self.DOUBLE_CLICK_THRESHOLD):
+            self._navigate_to(path)
+            self._last_dir_path = None
+            self._last_dir_time = 0
+            return
+
+        self._last_dir_path = path
+        self._last_dir_time = now
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Handle nav-up button."""
+        if event.button.id == "nav-up":
+            parent = Path(self.workspace).resolve().parent
+            self._navigate_to(parent)
+
+    def _navigate_to(self, path: Path) -> None:
+        """Switch the workspace to a new directory."""
+        resolved = str(path.resolve())
+        self.workspace = resolved
+
+        # Update the tree
+        tree = self.query_one("#file-tree", DirectoryTree)
+        tree.path = resolved
+        tree.reload()
+
+        # Update the nav path display
+        self.query_one("#nav-path", Static).update(self._short_path(resolved))
+
+        # Notify the app so it can update the connector and config
+        self.post_message(self.WorkspaceChanged(resolved))
+
+    @staticmethod
+    def _short_path(path: str) -> str:
+        home = str(Path.home())
+        if path.startswith(home):
+            return "~" + path[len(home):]
+        return path
 
     # Files that should be run in a new Terminal window on double-click
     _RUN_IN_TERMINAL = {

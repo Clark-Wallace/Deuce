@@ -138,6 +138,35 @@ Footer {
     padding: 0 1;
 }
 
+#file-nav-bar {
+    dock: top;
+    height: 1;
+    layout: horizontal;
+    background: #1a232d;
+}
+
+#nav-up {
+    width: 6;
+    min-width: 6;
+    height: 1;
+    background: #1a232d;
+    color: #8b949e;
+    border: none;
+}
+
+#nav-up:hover {
+    background: #2a3542;
+    color: #e6edf3;
+}
+
+#nav-path {
+    width: 1fr;
+    height: 1;
+    color: #535d68;
+    padding: 0 1;
+    overflow: hidden;
+}
+
 #file-tree {
     height: 1fr;
 }

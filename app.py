@@ -248,6 +248,12 @@ class Deuce(App):
         except Exception:
             pass
 
+    # ── Workspace navigation (from file browser) ──────────
+
+    def on_file_browser_workspace_changed(self, event: FileBrowser.WorkspaceChanged) -> None:
+        """User double-clicked a folder or navigated up in the file browser."""
+        self._switch_workspace(event.path)
+
     # ── Provider switching ────────────────────────────────
 
     def on_provider_switcher_provider_changed(self, event: ProviderSwitcher.ProviderChanged) -> None:
