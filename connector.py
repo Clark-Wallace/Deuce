@@ -1,65 +1,136 @@
 """Nexus SDK integration — wires NexusConnector hooks to Deuce widgets."""
 
 import os
-import asyncio
+import re
 from pathlib import Path
 from typing import Optional
+from dataclasses import dataclass, field
 
 from dotenv import load_dotenv
 load_dotenv()
 
 from nexus import NexusConnector
-from nexus.core.base_connector import AIProvider
 from tools import DEUCE_TOOLS, set_workspace
 from prompt import build_system_prompt
 
+# ── Provider configuration ────────────────────────────────
 
-KEY_MAP = {
-    "anthropic": "ANTHROPIC_API_KEY",
-    "openai": "OPENAI_API_KEY",
-    "google": "GOOGLE_API_KEY",
-    "deepseek": "DEEPSEEK_API_KEY",
-    "xai": "XAI_API_KEY",
-    "minimax": "MINIMAX_API_KEY",
-}
-
-PROVIDER_NAMES = {
-    "anthropic": "Anthropic Claude",
-    "openai": "OpenAI",
-    "google": "Google Gemini",
-    "deepseek": "DeepSeek",
-    "xai": "xAI Grok",
-    "minimax": "MiniMax M2.7",
-    "ollama": "Ollama (Local)",
+# Native Nexus providers — detected by legacy env var names
+NATIVE_PROVIDERS = {
+    "anthropic": {"env": "ANTHROPIC_API_KEY", "name": "Anthropic Claude"},
+    "openai":    {"env": "OPENAI_API_KEY",    "name": "OpenAI"},
+    "google":    {"env": "GOOGLE_API_KEY",     "name": "Google Gemini"},
+    "deepseek":  {"env": "DEEPSEEK_API_KEY",   "name": "DeepSeek"},
+    "xai":       {"env": "XAI_API_KEY",        "name": "xAI Grok"},
 }
 
 
-def get_available_providers() -> dict[str, str]:
-    """Return {provider_id: api_key} for all configured providers."""
-    available = {}
-    for prov, env_var in KEY_MAP.items():
-        key = os.getenv(env_var)
+@dataclass
+class ProviderConfig:
+    """Everything needed to connect to a provider."""
+    id: str                          # unique key for the dropdown
+    name: str                        # display name
+    api_key: str = ""
+    provider_type: str = ""          # nexus provider string ("anthropic", "openai", etc.)
+    base_url: str | None = None      # for openai-compatible providers
+    model: str | None = None         # override default model
+
+
+def discover_providers() -> dict[str, ProviderConfig]:
+    """
+    Scan environment for providers. Two sources:
+
+    1. Legacy env vars (ANTHROPIC_API_KEY, OPENAI_API_KEY, etc.)
+       → detected automatically for native Nexus providers
+
+    2. Dynamic AI_PROVIDER_# pattern:
+       AI_PROVIDER_1=anthropic
+       AI_PROVIDER_1_KEY=sk-ant-...
+       AI_PROVIDER_1_NAME=Anthropic Claude       (optional, auto-detected for native)
+       AI_PROVIDER_1_MODEL=claude-sonnet-4-...    (optional)
+
+       AI_PROVIDER_2=openai-compatible
+       AI_PROVIDER_2_KEY=...
+       AI_PROVIDER_2_NAME=MiniMax M2.7            (required for openai-compatible)
+       AI_PROVIDER_2_BASE_URL=https://api.minimax.io/v1  (required for openai-compatible)
+       AI_PROVIDER_2_MODEL=MiniMax-M2.7           (optional)
+
+    Dynamic providers override legacy if both define the same provider.
+    """
+    providers: dict[str, ProviderConfig] = {}
+
+    # ── 1. Legacy env vars ──
+    for prov_type, info in NATIVE_PROVIDERS.items():
+        key = os.getenv(info["env"])
         if key:
-            available[prov] = key
-    available["ollama"] = ""
-    return available
+            providers[prov_type] = ProviderConfig(
+                id=prov_type,
+                name=info["name"],
+                api_key=key,
+                provider_type=prov_type,
+            )
+
+    # ── 2. Dynamic AI_PROVIDER_# pattern ──
+    # Find all numbered providers
+    numbered = set()
+    for var in os.environ:
+        m = re.match(r"^AI_PROVIDER_(\d+)$", var)
+        if m:
+            numbered.add(int(m.group(1)))
+
+    for n in sorted(numbered):
+        prefix = f"AI_PROVIDER_{n}"
+        prov_type = os.getenv(prefix, "").strip().lower()
+        api_key = os.getenv(f"{prefix}_KEY", "").strip()
+        display_name = os.getenv(f"{prefix}_NAME", "").strip()
+        base_url = os.getenv(f"{prefix}_BASE_URL", "").strip() or None
+        model = os.getenv(f"{prefix}_MODEL", "").strip() or None
+
+        if not prov_type or not api_key:
+            continue
+
+        # Native provider (anthropic, openai, google, etc.)
+        if prov_type in NATIVE_PROVIDERS:
+            pid = prov_type
+            name = display_name or NATIVE_PROVIDERS[prov_type]["name"]
+            providers[pid] = ProviderConfig(
+                id=pid, name=name, api_key=api_key,
+                provider_type=prov_type, model=model,
+            )
+
+        # OpenAI-compatible provider (minimax, together, groq, etc.)
+        elif prov_type == "openai-compatible":
+            if not display_name or not base_url:
+                continue  # name and base_url required for custom providers
+            pid = f"custom_{n}"
+            providers[pid] = ProviderConfig(
+                id=pid, name=display_name, api_key=api_key,
+                provider_type="openai", base_url=base_url, model=model,
+            )
+
+    # ── 3. Ollama (always available, no key) ──
+    providers["ollama"] = ProviderConfig(
+        id="ollama", name="Ollama (Local)",
+        provider_type="ollama",
+    )
+
+    return providers
 
 
-def detect_default_provider() -> tuple[Optional[str], Optional[str]]:
-    """Pick the first available provider."""
-    default = os.getenv("NEXUS_DEFAULT_PROVIDER")
-    if default and default in KEY_MAP:
-        key = os.getenv(KEY_MAP[default])
-        if key:
-            return default, key
+def detect_default_provider(
+    providers: dict[str, ProviderConfig],
+) -> str:
+    """Pick the default provider. Priority: env setting > first cloud > ollama."""
+    default = os.getenv("NEXUS_DEFAULT_PROVIDER", "").strip().lower()
+    if default and default in providers:
+        return default
 
-    for prov, env_var in KEY_MAP.items():
-        key = os.getenv(env_var)
-        if key:
-            return prov, key
+    # First non-ollama provider
+    for pid, cfg in providers.items():
+        if pid != "ollama" and cfg.api_key:
+            return pid
 
-    # Fall back to Ollama if no cloud providers configured
-    return "ollama", ""
+    return "ollama"
 
 
 class DeuceConnector:
@@ -83,29 +154,37 @@ class DeuceConnector:
         self._on_provider_switch = on_provider_switch
         self._confirm_callback = confirm_callback
 
-        self.available_providers = get_available_providers()
-        provider, api_key = detect_default_provider()
-        self.current_provider = provider
-        self.current_api_key = api_key
+        # Discover all providers from env
+        self.providers = discover_providers()
+        self.current_provider = detect_default_provider(self.providers)
         self._connector: Optional[NexusConnector] = None
 
         # Set workspace for Deuce tools
         set_workspace(workspace)
 
+    @property
+    def available_providers(self) -> dict[str, str]:
+        """Return {provider_id: api_key} for backwards compat with app.py."""
+        return {pid: cfg.api_key for pid, cfg in self.providers.items()}
+
+    @property
+    def provider_display_name(self) -> str:
+        cfg = self.providers.get(self.current_provider)
+        return cfg.name if cfg else self.current_provider or "None"
+
     def _build_connector(self) -> NexusConnector:
         from nexus.core.base_connector import Message as NexusMessage
 
-        # MiniMax routes through OpenAI-compatible API
-        provider = self.current_provider
+        cfg = self.providers[self.current_provider]
         kwargs = {}
-        if provider == "minimax":
-            provider = "openai"
-            kwargs["base_url"] = "https://api.minimax.io/v1"
-            kwargs["model"] = "MiniMax-M2.7"
+        if cfg.base_url:
+            kwargs["base_url"] = cfg.base_url
+        if cfg.model:
+            kwargs["model"] = cfg.model
 
         connector = NexusConnector(
-            provider=provider,
-            api_key=self.current_api_key,
+            provider=cfg.provider_type,
+            api_key=cfg.api_key,
             workspace=self.workspace,
             max_iterations=20,
             tools=DEUCE_TOOLS,
@@ -142,10 +221,9 @@ class DeuceConnector:
 
     def switch_provider(self, provider_id: str) -> bool:
         """Switch to a different provider."""
-        if provider_id not in self.available_providers:
+        if provider_id not in self.providers:
             return False
         self.current_provider = provider_id
-        self.current_api_key = self.available_providers[provider_id]
         self._connector = None  # rebuild on next use
         return True
 
@@ -157,7 +235,3 @@ class DeuceConnector:
     @property
     def model_info(self) -> dict:
         return self.connector.model_info
-
-    @property
-    def provider_display_name(self) -> str:
-        return PROVIDER_NAMES.get(self.current_provider, self.current_provider or "None")

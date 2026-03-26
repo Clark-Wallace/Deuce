@@ -18,7 +18,7 @@ from widgets.action_ledger import ActionLedger
 from widgets.file_browser import FileBrowser
 from widgets.confirm_dialog import ConfirmDialog
 from widgets.provider_switcher import ProviderSwitcher
-from connector import DeuceConnector, PROVIDER_NAMES
+from connector import DeuceConnector
 
 
 class Deuce(App):
@@ -59,11 +59,10 @@ class Deuce(App):
 
     def compose(self) -> ComposeResult:
         yield Header()
-        # Build provider options from available providers
-        available = self.deuce_connector.available_providers
+        # Build provider options from discovered providers
         provider_options = {
-            pid: PROVIDER_NAMES.get(pid, pid)
-            for pid in available
+            pid: cfg.name
+            for pid, cfg in self.deuce_connector.providers.items()
         }
         yield ProviderSwitcher(
             providers=provider_options,
@@ -212,7 +211,7 @@ class Deuce(App):
 
         success = self.deuce_connector.switch_provider(provider_id)
         if success:
-            name = PROVIDER_NAMES.get(provider_id, provider_id)
+            name = self.deuce_connector.provider_display_name
             chat.add_system_message(f"Switched to {name}")
             ledger.log_info(f"Provider → {name}")
             self._update_footer()
