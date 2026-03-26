@@ -122,51 +122,53 @@ class Deuce(App):
         """User submitted a message — send it to the AI."""
         self._current_worker = self._run_message(event.text)
 
-    @work(thread=True, exclusive=True)
-    def _run_message(self, text: str) -> None:
-        """Send message via Nexus in a background thread so the UI stays live."""
-        self.call_from_thread(self._begin_working, text)
+    @work(exclusive=True)
+    async def _run_message(self, text: str) -> None:
+        """Send message via Nexus — async worker on the main event loop."""
+        chat = self.query_one(ChatPanel)
+        ledger = self.query_one(ActionLedger)
+        chat.set_working(True)
+        ledger.log_task_received(text)
+
         try:
-            result = asyncio.run(self.deuce_connector.execute_task(text))
-            self.call_from_thread(self._complete_task, result)
+            result = await self.deuce_connector.execute_task(text)
+
+            self._total_tokens += result.tokens_used
+            self._total_cost += result.cost
+            self._files_created.extend(result.files_created)
+
+            if result.content:
+                # Clean up the chat output — only show the final response,
+                # not iteration markers or intermediate thinking
+                content = result.content
+                # If there are iteration markers, take only the last section
+                if "--- Iteration" in content:
+                    sections = content.split("--- Iteration")
+                    last = sections[-1]
+                    # Strip the "N ---" header from the last section
+                    if "---" in last:
+                        last = last.split("---", 1)[-1]
+                    content = last.strip()
+                # Strip any remaining iteration noise
+                content = content.replace("[Guidance provided]", "").strip()
+                if content:
+                    chat.add_ai_message(content)
+            if result.files_created or result.iterations > 1:
+                ledger.log_complete(
+                    result.files_created, result.tokens_used, result.cost,
+                )
+            self._refresh_files()
+
         except Exception as e:
-            self.call_from_thread(self._fail_task, e)
+            chat.add_system_message(f"Error: {e}")
+            ledger.log_error(e)
+        finally:
+            chat.set_working(False)
+            self._update_footer()
 
-    def _begin_working(self, text: str = "") -> None:
-        self.query_one(ChatPanel).set_working(True)
-        if text:
-            self.query_one(ActionLedger).log_task_received(text)
-
-    def _complete_task(self, result) -> None:
-        self._total_tokens += result.tokens_used
-        self._total_cost += result.cost
-        self._files_created.extend(result.files_created)
-        if result.content:
-            self.query_one(ChatPanel).add_ai_message(result.content)
-        if result.files_created or result.iterations > 1:
-            self.query_one(ActionLedger).log_complete(
-                result.files_created, result.tokens_used, result.cost,
-            )
-        self._refresh_files()
-        self.query_one(ChatPanel).set_working(False)
-        self._update_footer()
-
-    def _fail_task(self, error: Exception) -> None:
-        self.query_one(ChatPanel).add_system_message(f"Error: {error}")
-        self.query_one(ActionLedger).log_error(error)
-        self.query_one(ChatPanel).set_working(False)
-        self._update_footer()
-
-    # ── Nexus hooks (called from background thread) ─────
-    #
-    # Hooks fire from the Nexus execution thread.
-    # call_from_thread schedules UI work on the main thread
-    # so Textual renders updates in real-time.
+    # ── Nexus hooks (called during execute_task) ────────
 
     def _handle_tool_call(self, tc: dict) -> None:
-        self.call_from_thread(self._on_tool_call, tc)
-
-    def _on_tool_call(self, tc: dict) -> None:
         try:
             self.query_one(ActionLedger).log_tool_call(tc)
         except Exception:
@@ -189,15 +191,11 @@ class Deuce(App):
             pass
 
     def _handle_tool_result(self, tr: dict) -> None:
-        self.call_from_thread(self._on_tool_result, tr)
-
-    def _on_tool_result(self, tr: dict) -> None:
         try:
             self.query_one(ActionLedger).log_tool_result(tr)
             self._refresh_files()
         except Exception:
             pass
-        # Show command output in live preview
         try:
             name = tr.get("name", "")
             result = tr.get("result", {})
@@ -209,27 +207,18 @@ class Deuce(App):
             pass
 
     def _handle_step(self, step: int, status: str) -> None:
-        self.call_from_thread(self._on_step, step, status)
-
-    def _on_step(self, step: int, status: str) -> None:
         try:
             self.query_one(ActionLedger).log_step(step, status)
         except Exception:
             pass
 
     def _handle_error(self, error: Exception) -> None:
-        self.call_from_thread(self._on_error, error)
-
-    def _on_error(self, error: Exception) -> None:
         try:
             self.query_one(ActionLedger).log_error(error)
         except Exception:
             pass
 
     def _handle_provider_switch(self, old: str, new: str, reason: str) -> None:
-        self.call_from_thread(self._on_provider_switch, old, new, reason)
-
-    def _on_provider_switch(self, old: str, new: str, reason: str) -> None:
         try:
             self.query_one(ActionLedger).log_provider_switch(old, new, reason)
             self.query_one(ChatPanel).add_system_message(

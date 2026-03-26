@@ -38,7 +38,7 @@ Footer {
 /* ── Action Ledger ────────────────────────────────────── */
 
 #action-ledger {
-    height: 2fr;
+    height: 3fr;
     background: #141b22;
 }
 
@@ -59,21 +59,26 @@ Footer {
 
 .ledger-group {
     padding: 0 1;
-    margin: 1 0 0 0;
+    margin: 0;
 }
 
 .ledger-narrative {
     padding: 0 1;
-    margin: 1 0 0 0;
+    margin: 0;
 }
 
 .ledger-error {
     padding: 0 1;
-    margin: 1 0 0 0;
+    margin: 0;
+}
+
+.ledger-task-header {
+    padding: 0 1;
+    margin: 0;
 }
 
 .ledger-footer {
-    padding: 1 1;
+    padding: 0 1;
     margin: 1 0 0 0;
     text-align: center;
 }
