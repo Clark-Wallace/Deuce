@@ -96,16 +96,17 @@ class FileBrowser(Horizontal):
         runner = cls._RUN_IN_TERMINAL.get(path.suffix.lower())
         if not runner:
             return
-        # osascript opens a new Terminal window and runs the command
-        cmd = f'{runner} "{path}"'
-        script = (
-            f'tell application "Terminal"\n'
-            f'  activate\n'
-            f'  do script "cd \\"{path.parent}\\" && {cmd}; echo \\"\\"; echo \\"[Press Enter to close]\\" && read"\n'
-            f'end tell'
-        )
+        # Build the shell command — use the absolute path to avoid quoting issues
+        abs_path = str(path.resolve())
+        parent = str(path.parent.resolve())
+        shell_cmd = f"cd '{parent}' && {runner} '{abs_path}'"
         try:
-            subprocess.Popen(["osascript", "-e", script], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            subprocess.Popen([
+                "osascript", "-e",
+                f'tell application "Terminal" to do script "{shell_cmd}"',
+                "-e",
+                'tell application "Terminal" to activate',
+            ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         except Exception:
             pass
 
