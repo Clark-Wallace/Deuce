@@ -212,11 +212,44 @@ class DeuceConnector:
         return self._connector
 
     async def send_message(self, message: str) -> dict:
-        """Send a chat message."""
+        """Send a single message. Tools auto-execute. Returns response dict."""
         return await self.connector.send_message(message)
 
+    async def agent_loop(self, task: str, max_turns: int = 20):
+        """Deuce's own agent loop — replaces Nexus execute_task.
+
+        Uses send_message in a loop. The AI calls tools until it responds
+        with text and no tool calls. No synthetic 'Continue' prompts.
+        No completion heuristics. The model decides when it's done.
+
+        Yields (turn, response) tuples so the caller can update the UI
+        after each turn.
+        """
+        message = task
+        for turn in range(max_turns):
+            response = await self.connector.send_message(message)
+
+            content = response.get("content", "")
+            tool_calls = response.get("tool_calls", [])
+            tool_results = response.get("tool_results", [])
+            usage = response.get("usage", {})
+
+            yield turn, response
+
+            # If the AI used tools, there may be more work.
+            # Send empty message to let it continue from tool results.
+            if tool_calls or tool_results:
+                message = ""
+                continue
+
+            # AI responded with text and no tools — done.
+            if content:
+                break
+
+        # If we exhausted max_turns, the last yield already happened.
+
     async def execute_task(self, task: str) -> object:
-        """Execute an autonomous task."""
+        """Legacy execute_task — still available but agent_loop is preferred."""
         return await self.connector.execute_task(task)
 
     def switch_provider(self, provider_id: str) -> bool:

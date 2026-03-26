@@ -124,40 +124,57 @@ class Deuce(App):
 
     @work(exclusive=True)
     async def _run_message(self, text: str) -> None:
-        """Send message via Nexus — async worker on the main event loop."""
+        """Deuce's agent loop — uses send_message, not execute_task.
+
+        Each turn updates the UI immediately. The AI calls tools until
+        it responds with text and no tool calls. No synthetic prompts.
+        No iteration counting. The model decides when it's done.
+        """
         chat = self.query_one(ChatPanel)
         ledger = self.query_one(ActionLedger)
         chat.set_working(True)
         ledger.log_task_received(text)
 
+        total_tokens = 0
+        files_created = []
+        tool_call_count = 0
+
         try:
-            result = await self.deuce_connector.execute_task(text)
+            async for turn, response in self.deuce_connector.agent_loop(text):
+                content = response.get("content", "")
+                tool_calls = response.get("tool_calls", [])
+                tool_results = response.get("tool_results", [])
+                usage = response.get("usage", {})
 
-            self._total_tokens += result.tokens_used
-            self._total_cost += result.cost
-            self._files_created.extend(result.files_created)
+                # Track stats
+                total_tokens += usage.get("total_tokens", 0)
+                tool_call_count += len(tool_calls) if tool_calls else 0
 
-            if result.content:
-                # Clean up the chat output — only show the final response,
-                # not iteration markers or intermediate thinking
-                content = result.content
-                # If there are iteration markers, take only the last section
-                if "--- Iteration" in content:
-                    sections = content.split("--- Iteration")
-                    last = sections[-1]
-                    # Strip the "N ---" header from the last section
-                    if "---" in last:
-                        last = last.split("---", 1)[-1]
-                    content = last.strip()
-                # Strip any remaining iteration noise
-                content = content.replace("[Guidance provided]", "").strip()
+                # Show AI text in chat as it arrives — each turn, not at the end
                 if content:
                     chat.add_ai_message(content)
-            if result.files_created or result.iterations > 1:
-                ledger.log_complete(
-                    result.files_created, result.tokens_used, result.cost,
-                )
-            self._refresh_files()
+
+                # Track created files from tool results
+                for tr in (tool_results or []):
+                    result = tr.get("result", {})
+                    if isinstance(result, dict) and result.get("path"):
+                        files_created.append(result["path"])
+
+                # Refresh file browser after tool use
+                if tool_calls or tool_results:
+                    self._refresh_files()
+
+            # Update totals
+            self._total_tokens += total_tokens
+            self._files_created.extend(files_created)
+
+            # Estimate cost (rough: $3 per 1M tokens for most providers)
+            cost = total_tokens * 0.000003
+            self._total_cost += cost
+
+            # Show completion in ledger if work was done
+            if tool_call_count > 0:
+                ledger.log_complete(files_created, total_tokens, cost)
 
         except Exception as e:
             chat.add_system_message(f"Error: {e}")
@@ -207,10 +224,7 @@ class Deuce(App):
             pass
 
     def _handle_step(self, step: int, status: str) -> None:
-        try:
-            self.query_one(ActionLedger).log_step(step, status)
-        except Exception:
-            pass
+        pass  # Agent loop doesn't use steps
 
     def _handle_error(self, error: Exception) -> None:
         try:
