@@ -356,71 +356,59 @@ class Deuce(App):
 
     @work(thread=True)
     def _execute_run_direct(self, file_path: str, file_name: str, runner: str) -> None:
-        """Run a file directly via subprocess — no AI involved."""
+        """Run a file via subprocess — stream output to live preview in real-time."""
         import subprocess
+        import time
 
-        self.call_from_thread(
-            self.query_one(LivePreview).show_output,
-            f"Running {file_name}",
-            f"$ {runner} {file_path}\n\n"
-        )
-        self.call_from_thread(
-            self.query_one(ActionLedger).log_info,
-            f"Running {file_name}"
-        )
+        preview = self.query_one(LivePreview)
+        self.call_from_thread(preview.show_output, f"Running {file_name}", f"$ {runner} {file_name}\n")
+        self.call_from_thread(self.query_one(ActionLedger).log_info, f"Running {file_name}")
 
         try:
-            result = subprocess.run(
+            proc = subprocess.Popen(
                 f"{runner} {file_path}",
                 shell=True,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
                 text=True,
-                timeout=30,
+                bufsize=1,
                 cwd=str(Path(file_path).parent),
             )
 
-            output = result.stdout or ""
-            if result.stderr:
-                output += f"\n--- stderr ---\n{result.stderr}"
+            start = time.time()
+            timeout = 30
+            lines_captured = 0
 
-            if result.returncode == 0:
-                display = f"$ {runner} {file_name}\n\n{output}" if output else f"$ {runner} {file_name}\n\n(no output)"
-                self.call_from_thread(
-                    self.query_one(LivePreview).show_output,
-                    f"✓ {file_name}", display
-                )
+            for line in proc.stdout:
+                if time.time() - start > timeout:
+                    proc.kill()
+                    self.call_from_thread(preview.append_line, f"\n⏱ Timed out after {timeout}s")
+                    self.call_from_thread(
+                        self.query_one(ActionLedger).log_info,
+                        f"⏱ {file_name} — timed out"
+                    )
+                    return
+                self.call_from_thread(preview.append_line, line.rstrip())
+                lines_captured += 1
+
+            proc.wait(timeout=5)
+
+            if proc.returncode == 0:
+                self.call_from_thread(preview.append_line, f"\n✓ exit 0")
                 self.call_from_thread(
                     self.query_one(ActionLedger).log_info,
-                    f"✓ {file_name} — exit 0"
+                    f"✓ {file_name} — exit 0 ({lines_captured} lines)"
                 )
             else:
-                display = f"$ {runner} {file_name}\n\nExit code: {result.returncode}\n\n{output}"
-                self.call_from_thread(
-                    self.query_one(LivePreview).show_output,
-                    f"✗ {file_name}", display
-                )
+                self.call_from_thread(preview.append_line, f"\n✗ exit {proc.returncode}")
                 self.call_from_thread(
                     self.query_one(ActionLedger).log_info,
-                    f"✗ {file_name} — exit {result.returncode}"
+                    f"✗ {file_name} — exit {proc.returncode}"
                 )
 
-        except subprocess.TimeoutExpired:
-            self.call_from_thread(
-                self.query_one(LivePreview).show_output,
-                f"⏱ {file_name}", f"$ {runner} {file_name}\n\nTimed out after 30 seconds."
-            )
-            self.call_from_thread(
-                self.query_one(ActionLedger).log_info,
-                f"⏱ {file_name} — timed out"
-            )
         except Exception as e:
-            self.call_from_thread(
-                self.query_one(LivePreview).show_output,
-                f"✗ {file_name}", f"Error: {e}"
-            )
-            self.call_from_thread(
-                self.query_one(ActionLedger).log_error, e
-            )
+            self.call_from_thread(preview.append_line, f"\nError: {e}")
+            self.call_from_thread(self.query_one(ActionLedger).log_error, e)
 
     def action_new_session(self) -> None:
         self.deuce_connector.clear_history()

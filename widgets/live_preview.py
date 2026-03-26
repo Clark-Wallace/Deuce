@@ -36,6 +36,11 @@ class LivePreview(Vertical):
         log.clear()
         log.write(Text(output))
 
+    def append_line(self, text: str) -> None:
+        """Append a line to the current output — for streaming."""
+        log = self.query_one("#preview-content", RichLog)
+        log.write(Text(text))
+
     def clear(self) -> None:
         """Reset to empty state."""
         title = self.query_one("#preview-title", Static)
