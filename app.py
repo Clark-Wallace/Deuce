@@ -99,13 +99,18 @@ class Deuce(App):
         ledger = self.query_one(ActionLedger)
         chat.set_working(True)
 
-        # Route: build tasks use execute_task (iterative loop),
-        # everything else uses send_message (single turn, faster).
-        # Only clear imperative build commands go through the heavy loop.
-        is_build_task = any(
-            kw in text.lower()
-            for kw in ["create", "build", "make", "write", "generate", "set up", "implement"]
-        )
+        # Route: only multi-step build tasks use execute_task (iterative loop).
+        # Simple commands and questions use send_message (single turn, faster).
+        # The threshold: would this require creating multiple files and running tests?
+        text_lower = text.lower()
+        build_phrases = [
+            "build a ", "build me ", "create a project", "create an app",
+            "create a rest", "create a web", "create a cli", "create a script",
+            "make a ", "make me ", "generate a ", "set up a ", "implement a ",
+            "write a program", "write an app", "write a script",
+            "build an ", "create a flask", "create a django", "create a react",
+        ]
+        is_build_task = any(phrase in text_lower for phrase in build_phrases)
 
         try:
             if is_build_task:
