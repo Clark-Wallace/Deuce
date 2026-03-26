@@ -15,7 +15,7 @@ Footer {
     height: 1;
 }
 
-/* Main layout: chat area (left) + action ledger (right) */
+/* Main layout: left column + right column */
 #main-container {
     layout: horizontal;
     height: 1fr;
@@ -27,28 +27,80 @@ Footer {
     layout: vertical;
 }
 
-/* Right column: action ledger */
-#action-ledger {
+/* Right column: ledger + split bar + live preview */
+#right-column {
     width: 1fr;
     min-width: 30;
-    border-left: solid $primary-darken-2;
+    border-left: solid #2a3542;
+    layout: vertical;
+}
+
+/* ── Action Ledger ────────────────────────────────────── */
+
+#action-ledger {
+    height: 2fr;
+    background: #141b22;
 }
 
 #action-ledger-title {
     dock: top;
     height: 1;
-    background: $primary-darken-2;
-    color: $text;
+    background: #1a232d;
+    color: #8b949e;
     text-align: center;
     text-style: bold;
     padding: 0 1;
 }
 
-#ledger-log {
+#ledger-scroll {
     height: 1fr;
+    background: #141b22;
 }
 
-/* Chat area */
+.ledger-group {
+    padding: 0 1;
+    margin: 1 0 0 0;
+}
+
+.ledger-narrative {
+    padding: 0 1;
+    margin: 1 0 0 0;
+}
+
+.ledger-error {
+    padding: 0 1;
+    margin: 1 0 0 0;
+}
+
+.ledger-footer {
+    padding: 1 1;
+    margin: 1 0 0 0;
+    text-align: center;
+}
+
+/* ── Live Preview ─────────────────────────────────────── */
+
+#live-preview {
+    height: 1fr;
+    background: #141b22;
+}
+
+#preview-title {
+    dock: top;
+    height: 1;
+    background: #1a232d;
+    color: #8b949e;
+    text-style: bold;
+    padding: 0 1;
+}
+
+#preview-content {
+    height: 1fr;
+    background: #0c1117;
+}
+
+/* ── Chat area ────────────────────────────────────────── */
+
 #chat-area {
     height: 2fr;
     border-bottom: solid $primary-darken-2;
@@ -64,7 +116,8 @@ Footer {
     padding: 0 1;
 }
 
-/* File browser area */
+/* ── File browser area ────────────────────────────────── */
+
 #file-area {
     height: 1fr;
     layout: horizontal;
@@ -106,7 +159,8 @@ Footer {
     height: 1fr;
 }
 
-/* Provider select in header area */
+/* ── Provider bar ─────────────────────────────────────── */
+
 #provider-bar {
     dock: top;
     height: 1;

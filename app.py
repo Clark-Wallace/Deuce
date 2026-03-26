@@ -155,6 +155,12 @@ class Deuce(App):
                 path = args.get("path", args.get("filename", ""))
                 if content and path:
                     self.query_one(LivePreview).show_file(path, content)
+            elif name == "execute_command":
+                cmd = args.get("command", "")
+                if cmd:
+                    self.query_one(LivePreview).show_file(
+                        "$ " + cmd, f"Running: {cmd}\n\nWaiting for output..."
+                    )
         except Exception:
             pass
 
@@ -165,6 +171,16 @@ class Deuce(App):
         try:
             self.query_one(ActionLedger).log_tool_result(tr)
             self._refresh_files()
+        except Exception:
+            pass
+        # Show command output in live preview
+        try:
+            name = tr.get("name", "")
+            result = tr.get("result", {})
+            if name == "execute_command" and isinstance(result, dict):
+                output = result.get("output", result.get("stdout", ""))
+                if output:
+                    self.query_one(LivePreview).show_output("Output", str(output))
         except Exception:
             pass
 
