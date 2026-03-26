@@ -227,6 +227,22 @@ pytest tests/ -v
 
 ---
 
+## Known Limitations (Nexus SDK)
+
+### No streaming within `execute_task`
+
+The Nexus SDK's `execute_task` loop calls `send_message`, waits for the full response, processes tool calls, and repeats. There is no within-step streaming. This causes two visible issues in Deuce:
+
+**Chat panel dumps at the end.** The AI's text responses accumulate into `result.content` as one string and only appear in chat when the entire task completes. During execution, the chat panel is static while the ledger streams tool calls in real-time. The fix is an `on_content` callback in the `execute_task` loop that fires each time the AI produces text, so Deuce can feed it to the chat panel via `call_from_thread`.
+
+**Live preview shows finished files, not files being written.** The `on_tool_call` hook fires with the complete `create_file` arguments — the file content is already fully formed. There's no token-by-token streaming of file content. For fast providers this looks instantaneous; for slow providers it looks like nothing until the file appears all at once. The fix is streaming tool call arguments as they arrive, which requires streaming support in the `execute_task` loop itself.
+
+**The ledger works in real-time** because Nexus fires `on_tool_call` and `on_tool_result` hooks between steps. Each hook triggers `call_from_thread` → widget update → Textual renders. This proves the TUI can handle real-time updates — the bottleneck is the SDK, not Textual.
+
+**Future fix:** Add streaming to `execute_task` — stream AI text via `on_content` callback, and stream tool call arguments incrementally. This is a significant Nexus SDK change that would benefit all Nexus applications, not just Deuce.
+
+---
+
 ## The Ledger: Design Reference
 
 The file `deuce_anvil_ships_log_ledger.html` in the repo root is the canonical visual reference. Key design decisions from that file:
