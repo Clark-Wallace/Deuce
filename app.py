@@ -58,7 +58,6 @@ class Deuce(App):
         ("shift+tab", "focus_previous", "Prev"),
         ("ctrl+o", "open_folder", "Open Folder"),
         ("ctrl+p", "focus_provider", "Provider"),
-        ("ctrl+r", "run_file", "Run File"),
         ("ctrl+c", "cancel_task", "Cancel"),
         ("ctrl+l", "clear_ledger", "Clear Ledger"),
         ("ctrl+n", "new_session", "New Session"),
@@ -361,88 +360,6 @@ class Deuce(App):
 
     def action_clear_ledger(self) -> None:
         self.query_one(ActionLedger).clear()
-
-    def action_run_file(self) -> None:
-        """Run the currently selected file directly — output goes to live preview."""
-        browser = self.query_one(FileBrowser)
-        if not browser.selected_file:
-            self.query_one(ChatPanel).add_system_message(
-                "No file selected. Click a file in the browser first."
-            )
-            return
-
-        path = browser.selected_file
-        suffix = path.suffix.lower()
-
-        runners = {
-            ".py": "python3", ".js": "node", ".ts": "npx tsx",
-            ".sh": "bash", ".rb": "ruby", ".go": "go run",
-        }
-
-        runner = runners.get(suffix)
-        if not runner:
-            self.query_one(ChatPanel).add_system_message(
-                f"Don't know how to run {path.name}"
-            )
-            return
-
-        self._execute_run_direct(str(path), path.name, runner)
-
-    @work(thread=True)
-    def _execute_run_direct(self, file_path: str, file_name: str, runner: str) -> None:
-        """Run a file via subprocess — stream output to live preview in real-time."""
-        import subprocess
-        import time
-
-        preview = self.query_one(LivePreview)
-        self.call_from_thread(preview.show_output, f"Running {file_name}", f"$ {runner} {file_name}\n")
-        self.call_from_thread(self.query_one(ActionLedger).log_info, f"Running {file_name}")
-
-        try:
-            proc = subprocess.Popen(
-                f"{runner} {file_path}",
-                shell=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-                cwd=str(Path(file_path).parent),
-            )
-
-            start = time.time()
-            timeout = 30
-            lines_captured = 0
-
-            for line in proc.stdout:
-                if time.time() - start > timeout:
-                    proc.kill()
-                    self.call_from_thread(preview.append_line, f"\n⏱ Timed out after {timeout}s")
-                    self.call_from_thread(
-                        self.query_one(ActionLedger).log_info,
-                        f"⏱ {file_name} — timed out"
-                    )
-                    return
-                self.call_from_thread(preview.append_line, line.rstrip())
-                lines_captured += 1
-
-            proc.wait(timeout=5)
-
-            if proc.returncode == 0:
-                self.call_from_thread(preview.append_line, f"\n✓ exit 0")
-                self.call_from_thread(
-                    self.query_one(ActionLedger).log_info,
-                    f"✓ {file_name} — exit 0 ({lines_captured} lines)"
-                )
-            else:
-                self.call_from_thread(preview.append_line, f"\n✗ exit {proc.returncode}")
-                self.call_from_thread(
-                    self.query_one(ActionLedger).log_info,
-                    f"✗ {file_name} — exit {proc.returncode}"
-                )
-
-        except Exception as e:
-            self.call_from_thread(preview.append_line, f"\nError: {e}")
-            self.call_from_thread(self.query_one(ActionLedger).log_error, e)
 
     def action_new_session(self) -> None:
         self.deuce_connector.clear_history()
