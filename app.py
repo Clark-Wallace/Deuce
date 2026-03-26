@@ -99,16 +99,16 @@ class Deuce(App):
         ledger = self.query_one(ActionLedger)
         chat.set_working(True)
 
-        # Heuristic: if the message looks like a task, use execute_task
-        is_task = any(
+        # Route: build tasks use execute_task (iterative loop),
+        # everything else uses send_message (single turn, faster).
+        # Only clear imperative build commands go through the heavy loop.
+        is_build_task = any(
             kw in text.lower()
-            for kw in ["create", "build", "make", "write", "generate", "set up", "implement", "add",
-                        "what files", "list", "show me", "search", "find", "run", "execute",
-                        "install", "test", "delete", "remove", "update", "fix", "check"]
+            for kw in ["create", "build", "make", "write", "generate", "set up", "implement"]
         )
 
         try:
-            if is_task:
+            if is_build_task:
                 ledger.log_info(f"Executing task...")
                 result = await self.deuce_connector.execute_task(text)
 
@@ -135,26 +135,20 @@ class Deuce(App):
                 response = await self.deuce_connector.send_message(text)
 
                 # If the AI responded with tool calls but no content,
-                # it needs the execute_task loop to complete the work
+                # the tools were auto-executed — send a follow-up to get the text answer
                 if response.get("tool_calls") and not response.get("content"):
-                    ledger.log_info("AI wants to use tools — switching to task mode...")
-                    result = await self.deuce_connector.execute_task(text)
-                    self._total_tokens += result.tokens_used
-                    self._total_cost += result.cost
-                    self._files_created.extend(result.files_created)
-                    if result.content:
-                        chat.add_ai_message(result.content)
-                    ledger.log_complete(
-                        result.files_created,
-                        result.tokens_used,
-                        result.cost,
-                    )
                     self._refresh_files()
+                    follow_up = await self.deuce_connector.send_message(
+                        "Please summarize the result."
+                    )
+                    usage = follow_up.get("usage", {})
+                    self._total_tokens += usage.get("total_tokens", 0)
+                    if follow_up.get("content"):
+                        chat.add_ai_message(follow_up["content"])
                 else:
                     # Normal chat response
                     usage = response.get("usage", {})
-                    tokens = usage.get("total_tokens", 0)
-                    self._total_tokens += tokens
+                    self._total_tokens += usage.get("total_tokens", 0)
 
                     if response.get("content"):
                         chat.add_ai_message(response["content"])
